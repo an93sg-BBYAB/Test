@@ -60,7 +60,7 @@ const player = {
     
     // (★ 추가!) 점프 쿨타임 변수
     isJumpCoolingDown: false,      // 현재 쿨타임 중인가?
-    jumpCooldown: 0.5,           // 쿨타임 시간 (0.2초)
+    jumpCooldown: 0.3,           // 쿨타임 시간 (0.3초)
     jumpCooldownStartTime: 0,    // 쿨타임 시작 시간
     
     // (★ 추가!) 8방향 스프라이트 변수
@@ -217,5 +217,6 @@ function animate() {
     update();
     renderer.render(scene, camera);
 }
+
 
 
