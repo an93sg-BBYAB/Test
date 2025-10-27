@@ -1,0 +1,12 @@
+/* 브라우저 기본 여백 제거 */
+body {
+    margin: 0;
+    overflow: hidden; /* 스크롤바 제거 */
+}
+
+/* 캔버스가 전체 화면을 채우도록 설정 */
+canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+}
