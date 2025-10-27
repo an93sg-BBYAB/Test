@@ -1,35 +1,29 @@
-// (동일) Three.js 라이브러리에서 필요한 기능들을 'import' 합니다.
 import * as THREE from 'three';
 
 // 1. ------------------
 //   기본 환경 설정
 // --------------------
 
-// (동일) 장면 (Scene)
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x333333); 
+scene.background = new THREE.Color(0x222222); // 배경색을 좀 더 어둡게
 
-// (★ 변경!) 카메라 (Camera)
-// PerspectiveCamera(시야각, 종횡비, 가까운 절단면, 먼 절단면)
+// (★ 변경!) PerspectiveCamera (원근 카메라)
 const aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
 
-// (★ 변경!) 카메라 초기 위치 설정
-// 플레이어(0,0,0)보다 뒤(z=10)에, 그리고 위(y=5)에 배치합니다.
-camera.position.set(0, 5, 10);
-// 플레이어의 발밑(0,0,0)을 바라보게 하여 자연스러운 기울임을 만듭니다.
-camera.lookAt(0, 0, 0); 
+// (★ 변경!) 카메라 초기 위치 및 각도
+// 카메라를 더 낮고(y=3), 더 가깝게(z=5) 배치합니다.
+camera.position.set(0, 3, 5);
+// 플레이어의 발밑(0,0,0)이 아닌, 몸통(0,1,0) 정도를 바라보게 설정
+camera.lookAt(0, 1, 0);
 scene.add(camera);
 
-// (동일) 렌더러 (Renderer)
-const canvas = document.getElementById('gameCanvas');
-const renderer = new THREE.WebGLRenderer({ canvas: canvas });
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('gameCanvas') });
 renderer.setSize(window.innerWidth, window.innerHeight);
 
-// (★ 변경!) 창 크기 변경 시 PerspectiveCamera 업데이트
 window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth / window.innerHeight;
-    camera.updateProjectionMatrix(); // (중요) PerspectiveCamera는 이 함수를 호출
+    camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
@@ -39,63 +33,64 @@ window.addEventListener('resize', () => {
 
 // (동일) 바닥 (Ground)
 const groundGeometry = new THREE.PlaneGeometry(100, 100);
-const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x555555 });
+const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x444444 });
 const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-// (동일) 바닥 그리드 (Grid)
-const gridHelper = new THREE.GridHelper(100, 100);
+// (동일) 바닥 그리드 (Grid) - 이제 원근감이 잘 보일 것입니다.
+const gridHelper = new THREE.GridHelper(100, 100, 0x888888, 0x888888);
 scene.add(gridHelper);
 
 // (동일) 플레이어 (Player)
 const player = {
-    speed: 0.1, 
-    sprite: null
+    speed: 0.1,
+    sprite: null,
+    // (★ 추가!) 플레이어의 3D 위치를 담을 객체
+    // Sprite는 2D 객체라 position.y를 중심으로 회전하는 등 문제가 있어
+    // 눈에 보이지 않는 3D '앵커(Anchor)'를 만들고, 스프라이트는 이 앵커를 따라다니게 합니다.
+    anchor: new THREE.Object3D() 
 };
+scene.add(player.anchor);
 
-// (동일) 텍스처 로더로 'player.png' 이미지 불러오기
+// (동일) 텍스처 로더
 const textureLoader = new THREE.TextureLoader();
 const playerTexture = textureLoader.load('player.png', () => {
-    animate(); // 이미지가 로드되면 게임 루프 시작
+    animate();
 });
 
 // (동일) SpriteMaterial과 Sprite
-const playerMaterial = new THREE.SpriteMaterial({ map: playerTexture });
+const playerMaterial = new THREE.SpriteMaterial({ map: playerTexture, sizeAttenuation: true }); // sizeAttenuation: true (기본값)이 원근감을 만듭니다.
 player.sprite = new THREE.Sprite(playerMaterial);
-player.sprite.scale.set(1, 1.6, 1); 
-// (중요) 플레이어의 y 위치를 올려서 바닥(y=0) 위에 서 있도록 함
-// Sprite의 중심이 발밑이 되도록 y 위치를 scale.y의 절반만큼 올립니다.
+player.sprite.scale.set(1, 1.6, 1);
+// (★ 변경!) 스프라이트의 위치는 항상 앵커의 y축 절반만큼 위 (발밑)
 player.sprite.position.y = player.sprite.scale.y / 2; 
-scene.add(player.sprite);
+
+// (★ 변경!) 스프라이트를 앵커(Object3D)의 자식으로 만듭니다.
+// 이제 우리는 'player.anchor'를 움직이면, 스프라이트가 알아서 따라옵니다.
+player.anchor.add(player.sprite);
+
 
 // 3. ------------------
 //   입력 및 게임 루프
 // --------------------
 
-// (동일) 키보드 입력 상태 저장
 const keysPressed = {};
 window.addEventListener('keydown', (e) => { keysPressed[e.key.toLowerCase()] = true; });
 window.addEventListener('keyup', (e) => { keysPressed[e.key.toLowerCase()] = false; });
 
-// (★ 변경!) 업데이트 함수 (카메라 추적 로직 추가)
+// (★ 변경!) 카메라가 따라갈 기준점 (오프셋)
+const cameraOffset = new THREE.Vector3(0, 3, 5); // x: 0, y: 3, z: 5
+
 function update() {
     let dx = 0; // x축 (좌/우)
     let dz = 0; // z축 (앞/뒤)
 
-    // (동일) 키 매핑: W/S -> z축, A/D -> x축
-    if (keysPressed['w']) {
-        dz -= 1; // '앞으로' (카메라에서 멀어짐: -z)
-    }
-    if (keysPressed['s']) {
-        dz += 1; // '뒤로' (카메라로 다가옴: +z)
-    }
-    if (keysPressed['a']) {
-        dx -= 1; // '왼쪽' (-x)
-    }
-    if (keysPressed['d']) {
-        dx += 1; // '오른쪽' (+x)
-    }
+    // (동일) W/S -> z축(앞/뒤), A/D -> x축(좌/우)
+    if (keysPressed['w']) dz -= 1; // 전진 (z축 음의 방향)
+    if (keysPressed['s']) dz += 1; // 후진 (z축 양의 방향)
+    if (keysPressed['a']) dx -= 1; // 좌로 이동
+    if (keysPressed['d']) dx += 1; // 우로 이동
 
     // (동일) 대각선 속도 보정
     const magnitude = Math.sqrt(dx * dx + dz * dz);
@@ -104,22 +99,29 @@ function update() {
         const normalizedDx = dx / magnitude;
         const normalizedDz = dz / magnitude;
 
-        // (동일) 플레이어 위치 업데이트
-        player.sprite.position.x += normalizedDx * player.speed;
-        player.sprite.position.z += normalizedDz * player.speed;
+        // (★ 변경!) player.sprite가 아닌 player.anchor를 움직입니다.
+        player.anchor.position.x += normalizedDx * player.speed;
+        player.anchor.position.z += normalizedDz * player.speed;
     }
     
-    // (★ 추가!) 카메라가 플레이어를 따라다니도록 설정
-    // 카메라는 항상 플레이어보다 z축으로 10만큼 뒤에, y축으로 5만큼 위에 있습니다.
-    camera.position.x = player.sprite.position.x;
-    camera.position.y = player.sprite.position.y + 5;
-    camera.position.z = player.sprite.position.z + 10;
+    // (★ 변경!) 카메라가 'player.anchor'를 따라다니도록 수정
+    // (요청한 3번 '데드존'은 심도와 충돌하므로, 여기서는 100% 따라다니게 합니다.)
     
-    // (★ 추가!) 카메라는 항상 플레이어를 바라봅니다.
-    camera.lookAt(player.sprite.position);
+    // 1. 카메라의 새 위치 계산: 플레이어 위치 + 카메라 오프셋
+    const cameraTargetPosition = player.anchor.position.clone().add(cameraOffset);
+    
+    // 2. (부드러운 이동) 카메라 위치를 목표 위치로 부드럽게 이동 (선택 사항)
+    // camera.position.lerp(cameraTargetPosition, 0.1); // 0.1의 속도로 따라감
+    
+    // 2. (즉각 이동) 카메라 위치를 즉시 이동
+    camera.position.copy(cameraTargetPosition);
+    
+    // 3. 카메라는 항상 플레이어의 몸통(y=1)을 바라봅니다.
+    const lookAtTarget = player.anchor.position.clone();
+    lookAtTarget.y += 1.0; // 발밑이 아닌 몸통을 보도록
+    camera.lookAt(lookAtTarget);
 }
 
-// (동일) 렌더링 루프 (Game Loop)
 function animate() {
     requestAnimationFrame(animate);
     update();
