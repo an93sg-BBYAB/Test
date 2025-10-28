@@ -34,27 +34,33 @@ window.addEventListener('resize', () => {
 // 2. ------------------
 //   게임 객체 생성
 // --------------------
-// (동일) 바닥 지오메트리
-const groundGeometry = new THREE.PlaneGeometry(100, 100, 50, 50);
 
-// (동일) 짙은 회색 바닥
+// (★ 변경!) 바닥 지오메트리 (100x100 크기, 20x20 격자 -> 5x5 간격)
+const groundGeometry = new THREE.PlaneGeometry(100, 100, 20, 20);
+
+// (★ 변경!) 짙은 회색 바닥
 const groundMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x444444, 
+    color: 0x444444, // 짙은 회색
     wireframe: false
 });
 const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-// (★ 변경!) Z-fighting 수정 (옵션 제거)
+// (★ 변경!) Z-fighting 해결 (polygonOffset 재적용)
 const wireframeMaterial = new THREE.MeshBasicMaterial({ 
     color: 0xFFFF00, // 노란색
-    wireframe: true 
+    wireframe: true,
+    
+    // (★ 추가!) Z-fighting 해결 (항상 격자를 위에 그림)
+    polygonOffset: true,
+    polygonOffsetFactor: -1.0, 
+    polygonOffsetUnits: -0.1
 });
 const groundWireframe = new THREE.Mesh(groundGeometry, wireframeMaterial);
 groundWireframe.rotation.x = -Math.PI / 2;
-// (★ 변경!) Z-fighting 해결을 위해 격자를 0.01만큼 살짝 띄움
-groundWireframe.position.y = 0.01; 
+// (★ 삭제!) position.y로 띄우는 방식 대신 polygonOffset 사용
+// groundWireframe.position.y = 0.01; 
 scene.add(groundWireframe);
 
 
@@ -70,6 +76,11 @@ for (let i = 0; i < vertices.count; i++) {
 vertices.needsUpdate = true;
 ground.geometry.computeVertexNormals(); 
 
+// (★ 추가!) Raycaster가 감지할 수 있도록 경계(Bounds) 업데이트
+ground.geometry.computeBoundingBox();
+ground.geometry.computeBoundingSphere();
+
+
 // (동일) 조명
 const light = new THREE.DirectionalLight(0xffffff, 1.5);
 light.position.set(5, 10, 5);
@@ -84,7 +95,7 @@ const player = {
     model: null,
     isJumping: false,
     jumpStartTime: 0,
-    jumpHeight: 1.6 / 3.0, // (모델 로드 후 덮어쓸 임시값)
+    jumpHeight: 1.6 / 3.0, 
     timeToPeak: 0.25,
     jumpDuration: 0.5,
     baseY: 0, 
@@ -117,7 +128,7 @@ gltfLoader.load(
         // (★ 추가!) 실제 모델 크기 기반으로 점프 높이 재설정
         const box = new THREE.Box3().setFromObject(player.model);
         const size = box.getSize(new THREE.Vector3());
-        if (size.y > 0.1) { // 0이 아닌 유효한 크기일 때
+        if (size.y > 0.1) {
             player.jumpHeight = size.y / 3.0;
         }
     }, 
@@ -128,7 +139,7 @@ gltfLoader.load(
         const geometry = new THREE.BoxGeometry(0.8, 1.6, 0.8);
         const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         player.model = new THREE.Mesh(geometry, material);
-        player.model.position.y = 1.6 / 2; // 큐브는 중심이 원점이므로 띄움
+        player.model.position.y = 1.6 / 2;
         player.anchor.add(player.model);
     }
 );
@@ -140,7 +151,7 @@ window.addEventListener('keyup', (e) => { keysPressed[e.key.toLowerCase()] = fal
 const cameraOffset = new THREE.Vector3(0, 3, 5);
 
 
-// (★ 변경!) update 함수 (W/S 오류 수정)
+// (동일) update 함수
 function update() {
     
     // (쿨타임)
@@ -164,7 +175,7 @@ function update() {
     if (keysPressed['a']) dx -= 1;
     if (keysPressed['d']) dx += 1;
     
-    // (★ FIX!) magnitude 계산 오타 수정 (dx * dz -> dx * dx)
+    // (★ FIX!) magnitude 계산 오타 수정 (이전 코드에 반영됨)
     const magnitude = Math.sqrt(dx * dx + dz * dz); 
 
     if (magnitude > 0) {
@@ -172,7 +183,6 @@ function update() {
         const normalizedDx = dx / magnitude;
         const normalizedDz = dz / magnitude;
         
-        // (★ 중요!) 이제 z축 이동이 정상적으로 계산됩니다.
         player.anchor.position.x += normalizedDx * player.speed;
         player.anchor.position.z += normalizedDz * player.speed;
         
@@ -188,10 +198,15 @@ function update() {
     // (지형 감지)
     const rayOrigin = player.anchor.position.clone().add(rayOriginOffset);
     raycaster.set(rayOrigin, rayDirection);
+    // (★ 변경!) Z-fighting과 상관없이 회색 바닥(ground)만 감지
     const intersects = raycaster.intersectObject(ground); 
     
     if (intersects.length > 0) {
+        // (★ 중요!) Raycaster가 감지한 지형의 Y값을 baseY로 설정
         player.baseY = intersects[0].point.y;
+    } else {
+        // (안전 장치) 감지 실패 시 추락 방지 (Y=0 유지)
+        player.baseY = 0; 
     }
 
     // (점프)
@@ -199,17 +214,17 @@ function update() {
         const jumpTime = clock.getElapsedTime() - player.jumpStartTime;
         if (jumpTime >= player.jumpDuration) {
             player.isJumping = false;
-            player.anchor.position.y = player.baseY;
+            player.anchor.position.y = player.baseY; // 착지
             player.isJumpCoolingDown = true;
             player.jumpCooldownStartTime = clock.getElapsedTime();
         } else {
             const a = player.jumpHeight / (player.timeToPeak * player.timeToPeak);
             const t = jumpTime - player.timeToPeak;
             const newY = -a * (t * t) + player.jumpHeight;
-            player.anchor.position.y = player.baseY + newY;
+            player.anchor.position.y = player.baseY + newY; // 지형 높이 + 점프 높이
         }
     } else {
-        // (★ 중요!) 점프 중이 아닐 때, 캐릭터 Y위치를 지형 높이로 설정
+        // (★ 중요!) 점프 중이 아닐 때, 캐릭터 Y위치를 지형 높이(baseY)로 설정
         player.anchor.position.y = player.baseY;
     }
     
