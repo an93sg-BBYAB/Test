@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+// (★ 추가!) 3D 모델 로더 import
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 // (동일) 시계
 const clock = new THREE.Clock();
@@ -41,111 +43,106 @@ const gridHelper = new THREE.GridHelper(100, 100, 0x888888, 0x888888);
 scene.add(gridHelper);
 
 
-// (동일) 스프라이트 스케일
-const playerScale = new THREE.Vector3(1, 1.6, 1);
-
-// (★ 변경!) 플레이어 객체에 쿨타임 및 방향 변수 추가
+// (★ 변경!) 플레이어 객체
 const player = {
     speed: 0.1,
-    anchor: new THREE.Object3D(),
-    sprite: null,
+    anchor: new THREE.Object3D(), // (동일) 플레이어의 실제 위치 기준점
+    model: null,                 // (★ 추가!) 3D 모델을 담을 변수
     
     // (동일) 점프 변수
     isJumping: false,
     jumpStartTime: 0,
-    jumpHeight: playerScale.y / 3.0,
+    jumpHeight: 1.6 / 3.0, // (임시) 스케일 1.6 기준으로 계산
     timeToPeak: 0.25,
     jumpDuration: 0.5,
     baseY: 0,
     
-    // (★ 추가!) 점프 쿨타임 변수
-    isJumpCoolingDown: false,      // 현재 쿨타임 중인가?
-    jumpCooldown: 0.3,           // 쿨타임 시간 (0.3초)
-    jumpCooldownStartTime: 0,    // 쿨타임 시작 시간
+    // (동일) 쿨타임 변수
+    isJumpCoolingDown: false,
+    jumpCooldown: 0.2,
+    jumpCooldownStartTime: 0,
     
-    // (★ 추가!) 8방향 스프라이트 변수
-    currentDirection: 's'        // 현재 바라보는 방향 (s: South, 남쪽/앞)
+    // (★ 추가!) 부드러운 회전을 위한 변수
+    targetRotationY: 0,          // 목표 Y축 회전값
+    currentRotationY: 0          // 현재 Y축 회전값
 };
 scene.add(player.anchor);
 player.anchor.position.y = player.baseY;
 
-// (★ 변경!) 8방향 텍스처 로딩
-const textures = {}; // 8방향 텍스처를 저장할 객체
-
-// (★ 추가!) 로딩 매니저: 모든 텍스처가 로드되면 게임 루프 시작
+// (★ 변경!) 3D 모델 로딩
 const loadingManager = new THREE.LoadingManager();
 loadingManager.onLoad = () => {
     clock.start();
     animate(); // 모든 로딩이 끝나면 게임 시작
 };
-const textureLoader = new THREE.TextureLoader(loadingManager);
 
-// (★ 중요!) 8방향 이미지를 로드합니다.
-// 지금은 'player.png'만 사용하지만, 나중에 8개의 실제 파일로 교체해야 합니다.
-const tempTexture = 'player.png'; // 임시 파일
-textures.s  = textureLoader.load(tempTexture); // S (앞)
-textures.n  = textureLoader.load(tempTexture); // N (뒤)
-textures.w  = textureLoader.load(tempTexture); // W (좌)
-textures.e  = textureLoader.load(tempTexture); // E (우)
-textures.sw = textureLoader.load(tempTexture); // SW (앞-좌)
-textures.se = textureLoader.load(tempTexture); // SE (앞-우)
-textures.nw = textureLoader.load(tempTexture); // NW (뒤-좌)
-textures.ne = textureLoader.load(tempTexture); // NE (뒤-우)
-/* // (나중에 이렇게 바꿔야 합니다)
-textures.s  = textureLoader.load('player_front.png');
-textures.n  = textureLoader.load('player_back.png');
-textures.w  = textureLoader.load('player_left.png');
-textures.e  = textureLoader.load('player_right.png');
-textures.sw = textureLoader.load('player_front_left.png');
-// ... 
-*/
+// (★ 변경!) TextureLoader -> GLTFLoader
+const gltfLoader = new GLTFLoader(loadingManager);
 
-// (★ 변경!) 초기 텍스처(앞모습)로 재질 생성
-const playerMaterial = new THREE.SpriteMaterial({ map: textures.s, sizeAttenuation: true });
-player.sprite = new THREE.Sprite(playerMaterial);
-player.sprite.scale.copy(playerScale);
-player.sprite.position.y = playerScale.y / 2; 
-player.anchor.add(player.sprite);
+// (★ 중요!) 'player.glb' 파일을 로드합니다. (같은 폴더에 있어야 함)
+gltfLoader.load('player.glb', (gltf) => {
+    player.model = gltf.scene; // 로드된 모델의 'scene'을 player.model에 할당
+
+    // (선택 사항) 모델 크기 및 초기 위치 조절
+    // player.model.scale.set(0.5, 0.5, 0.5); // 모델이 너무 크면 조절
+    
+    // (중요) 모델의 발밑을 anchor(0,0,0)에 맞추기
+    // 3D 모델은 보통 (0,0,0)을 중심으로 만드므로, y축으로 올려서 발밑을 맞춥니다.
+    // 이는 모델마다 다를 수 있으므로 값을 조절해야 합니다.
+    // player.model.position.y = 0.8; // (예시: 모델 키의 절반)
+    
+    player.anchor.add(player.model); // anchor에 모델을 자식으로 추가
+    
+    // (★ 변경!) 점프 높이를 모델 크기에 맞게 재설정 (선택 사항)
+    // const box = new THREE.Box3().setFromObject(player.model);
+    // const height = box.max.y - box.min.y;
+    // player.jumpHeight = height / 3.0;
+
+}, undefined, (error) => {
+    console.error('An error happened while loading the model:', error);
+    // (★ 에러 처리) .glb 로드 실패 시, 임시 큐브로 대체
+    const geometry = new THREE.BoxGeometry(0.8, 1.6, 0.8);
+    const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+    player.model = new THREE.Mesh(geometry, material);
+    player.model.position.y = 1.6 / 2;
+    player.anchor.add(player.model);
+});
 
 
 // 3. ------------------
 //   입력 및 게임 루프
 // --------------------
-// (동일) 키보드 입력 상태 저장
+// (이전과 동일: keysPressed, keydown/keyup 리스너, cameraOffset...)
 const keysPressed = {};
 window.addEventListener('keydown', (e) => {
     keysPressed[e.key.toLowerCase()] = true;
-    // (★ 삭제!) 스페이스바 점프 로직은 update() 함수로 이동
 });
 window.addEventListener('keyup', (e) => {
     keysPressed[e.key.toLowerCase()] = false;
 });
 
-// (동일) 카메라 오프셋
 const cameraOffset = new THREE.Vector3(0, 3, 5);
 
-// (★ 변경!) update 함수에 쿨타임 및 방향 전환 로직 추가
+
+// (★ 변경!) update 함수
 function update() {
     
-    // --- 1. 점프 쿨타임 확인 ---
+    // (동일) 쿨타임 확인
     if (player.isJumpCoolingDown) {
-        const cooldownTime = clock.getElapsedTime() - player.jumpCooldownStartTime;
-        if (cooldownTime >= player.jumpCooldown) {
-            player.isJumpCoolingDown = false; // 쿨타임 종료
+        if (clock.getElapsedTime() - player.jumpCooldownStartTime >= player.jumpCooldown) {
+            player.isJumpCoolingDown = false;
         }
     }
 
-    // --- 2. 점프 입력 (스페이스바를 누르고 있을 때) ---
-    // (★ 추가!) 쿨타임이 아니고, 점프 중이 아닐 때만 점프 가능
+    // (동일) 점프 입력
     if (keysPressed[' '] && !player.isJumping && !player.isJumpCoolingDown) {
         player.isJumping = true;
         player.jumpStartTime = clock.getElapsedTime();
     }
 
-    // --- 3. 수평 이동 및 방향 결정 ---
+    // --- 3. 수평 이동 및 (★)모델 회전 ---
     let dx = 0; 
     let dz = 0; 
-    let newDirection = player.currentDirection; // 일단 현재 방향 유지
 
     if (keysPressed['w']) dz -= 1;
     if (keysPressed['s']) dz += 1;
@@ -155,45 +152,39 @@ function update() {
     const magnitude = Math.sqrt(dx * dx + dz * dz);
 
     if (magnitude > 0) { // (이동 중일 때)
-        // 3-1. 방향 결정
-        if (dz < 0) { // W (북쪽)
-            if (dx < 0) newDirection = 'nw';
-            else if (dx > 0) newDirection = 'ne';
-            else newDirection = 'n';
-        } else if (dz > 0) { // S (남쪽)
-            if (dx < 0) newDirection = 'sw';
-            else if (dx > 0) newDirection = 'se';
-            else newDirection = 's';
-        } else { // W/S 안 누름
-            if (dx < 0) newDirection = 'w';
-            else if (dx > 0) newDirection = 'e';
-        }
+        // 3-1. (★ 변경!) 텍스처 교체 대신, 목표 회전값(각도) 계산
+        // Math.atan2(dx, dz)를 사용해 x, z 방향에 맞는 Y축 각도를 구합니다.
+        player.targetRotationY = Math.atan2(dx, dz);
 
-        // 3-2. 방향이 바뀌었다면 스프라이트 교체
-        if (newDirection !== player.currentDirection) {
-            player.sprite.material.map = textures[newDirection];
-            player.currentDirection = newDirection;
-        }
-
-        // 3-3. 실제 위치 이동 (공중이든 땅이든 동일하게 적용)
+        // 3-2. (동일) 실제 위치 이동
         const normalizedDx = dx / magnitude;
         const normalizedDz = dz / magnitude;
         player.anchor.position.x += normalizedDx * player.speed;
         player.anchor.position.z += normalizedDz * player.speed;
     }
+    
+    // (★ 추가!) 부드러운 회전 (Lerp)
+    // 현재 각도에서 목표 각도로 10%씩 부드럽게 회전
+    // (참고: -PI와 +PI를 넘나들 때 순간적으로 반대 방향으로 돌 수 있음)
+    // (더 완벽하게 하려면 Quaternion.slerp를 써야 하지만, 지금은 lerp로 구현)
+    player.currentRotationY = THREE.MathUtils.lerp(
+        player.currentRotationY, 
+        player.targetRotationY, 
+        0.1 // 회전 속도 (0.1 = 10%)
+    );
+    player.anchor.rotation.y = player.currentRotationY;
+
 
     // --- 4. 수직 이동 (점프) ---
+    // (이전과 동일)
     if (player.isJumping) {
         const jumpTime = clock.getElapsedTime() - player.jumpStartTime;
-
         if (jumpTime >= player.jumpDuration) {
-            // (★ 변경!) 착지 시 쿨타임 시작
             player.isJumping = false;
             player.anchor.position.y = player.baseY; 
-            player.isJumpCoolingDown = true; // 쿨타임 시작
-            player.jumpCooldownStartTime = clock.getElapsedTime(); // 쿨타임 시작 시간 기록
+            player.isJumpCoolingDown = true;
+            player.jumpCooldownStartTime = clock.getElapsedTime();
         } else {
-            // (동일) 포물선 계산
             const a = player.jumpHeight / (player.timeToPeak * player.timeToPeak);
             const t = jumpTime - player.timeToPeak;
             const newY = -a * (t * t) + player.jumpHeight;
@@ -217,6 +208,3 @@ function animate() {
     update();
     renderer.render(scene, camera);
 }
-
-
-
