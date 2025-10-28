@@ -13,8 +13,8 @@ const rayDirection = new THREE.Vector3(0, -1, 0);
 // --------------------
 
 const scene = new THREE.Scene();
-// (★ 변경!) 배경색을 어두운 파란색(하늘)으로 변경 (0x111122)
-scene.background = new THREE.Color(0x111122); 
+// (★ 변경!) 배경색: 하얀색
+scene.background = new THREE.Color(0xFFFFFF); 
 
 // (이전과 동일: camera, renderer, resize 리스너...)
 const aspect = window.innerWidth / window.innerHeight;
@@ -35,17 +35,31 @@ window.addEventListener('resize', () => {
 //   게임 객체 생성
 // --------------------
 
-// (동일) 바닥 지오메트리
+// (동일) 바닥 지오메트리 (50x50 격자)
 const groundGeometry = new THREE.PlaneGeometry(100, 100, 50, 50);
 
-// (★ 변경!) 바닥 재질의 색을 밝은 회색(0x888888)으로 변경
+// (★ 변경!) 바닥 재질: 조금 어두운 회색
 const groundMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x888888, // 밝은 회색
-    wireframe: false 
+    color: 0x666666, // 어두운 회색
+    wireframe: false // 면을 채움
 });
 const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
+
+// (★ 추가!) 바닥 격자 테두리 (노란색 와이어프레임)
+// 1. 노란색 와이어프레임 재질 생성
+const wireframeMaterial = new THREE.MeshBasicMaterial({ 
+    color: 0xFFFF00, // 노란색
+    wireframe: true 
+});
+// 2. 바닥과 *같은* 지오메트리를 사용하는 새 메쉬 생성
+const groundWireframe = new THREE.Mesh(groundGeometry, wireframeMaterial);
+// 3. 바닥과 *같은* 회전값 적용
+groundWireframe.rotation.x = -Math.PI / 2;
+// 4. 장면에 추가 (회색 바닥 위에 겹쳐짐)
+scene.add(groundWireframe);
+
 
 // (이전과 동일: 노이즈 생성 및 지형 변형 로직...)
 const noise2D = createNoise2D();
@@ -59,16 +73,4 @@ for (let i = 0; i < vertices.count; i++) {
 vertices.needsUpdate = true;
 ground.geometry.computeVertexNormals(); 
 
-// (이전과 동일: 조명...)
-const light = new THREE.DirectionalLight(0xffffff, 1);
-light.position.set(5, 10, 5);
-scene.add(light);
-const ambientLight = new THREE.AmbientLight(0x404040);
-scene.add(ambientLight);
-
-// (이전과 동일: Player 객체 정의...)
-const player = {
-    speed: 0.1,
-    anchor: new THREE.Object3D(),
-    model: null,
-    isJumping: false,
+// (이전과 동일: 조
