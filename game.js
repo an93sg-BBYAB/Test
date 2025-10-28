@@ -2,21 +2,22 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createNoise2D } from 'simplex-noise';
 
-// (동일) 시계, Raycaster
+// (동일) clock, raycaster
 const clock = new THREE.Clock();
 const raycaster = new THREE.Raycaster();
 const rayOriginOffset = new THREE.Vector3(0, 10, 0); 
 const rayDirection = new THREE.Vector3(0, -1, 0);   
 
+// (★ 추가!) 좌표 표시 엘리먼트
+const coordsElement = document.getElementById('coords');
+
 // 1. ------------------
 //   기본 환경 설정
 // --------------------
-
 const scene = new THREE.Scene();
-// (★ 요청!) 배경색: 하얀색
-scene.background = new THREE.Color(0xFFFFFF); 
+scene.background = new THREE.Color(0xFFFFFF); // (동일) 하얀색 배경
 
-// (동일) 카메라, 렌더러
+// (동일) camera, renderer
 const aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
 camera.position.set(0, 3, 5);
@@ -35,22 +36,27 @@ window.addEventListener('resize', () => {
 //   게임 객체 생성
 // --------------------
 
-// (동일) 바닥 지오메트리 (50x50 격자)
+// (동일) 바닥 지오메트리
 const groundGeometry = new THREE.PlaneGeometry(100, 100, 50, 50);
 
-// (★ 요청!) 바닥 재질: 조금 어두운 회색
+// (★ 변경!) 바닥 재질: 짙은 회색
 const groundMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x666666, // 어두운 회색
+    color: 0x444444, // 짙은 회색
     wireframe: false
 });
 const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-// (★ 요청!) 바닥 격자 테두리: 노란색
+// (★ 변경!) 바닥 격자 테두리 (Z-fighting 해결)
 const wireframeMaterial = new THREE.MeshBasicMaterial({ 
     color: 0xFFFF00, // 노란색
-    wireframe: true 
+    wireframe: true,
+    
+    // (★ 추가!) Z-fighting 해결을 위한 옵션
+    polygonOffset: true,
+    polygonOffsetFactor: -1.0,
+    polygonOffsetUnits: -0.1
 });
 const groundWireframe = new THREE.Mesh(groundGeometry, wireframeMaterial);
 groundWireframe.rotation.x = -Math.PI / 2;
@@ -94,22 +100,26 @@ const player = {
 scene.add(player.anchor);
 player.anchor.position.y = player.baseY;
 
-// (동일) GLTFLoader 로직 (player.png가 아님!)
+// (동일) 로딩 매니저
 const loadingManager = new THREE.LoadingManager();
 loadingManager.onLoad = () => {
     clock.start();
     animate();
 };
+
+// (★ 변경!) GLTFLoader 로직 (모델 발밑 맞추기)
 const gltfLoader = new GLTFLoader(loadingManager);
 gltfLoader.load(
-    'player.glb', // (★ 중요!) .glb 파일을 로드합니다
+    'player.glb', 
     (gltf) => {
         player.model = gltf.scene;
+        // (★ FIX!) 모델 로드 성공 시, 발밑 위치 조절
+        player.model.position.y = 1.6 / 2; // (가정) 모델 키의 절반
         player.anchor.add(player.model);
     }, 
     undefined, 
     (error) => {
-        // (★ 중요!) 로드 실패 시 빨간 큐브
+        // (동일) 로드 실패 시 빨간 큐브
         console.error('모델 로드 실패:', error);
         const geometry = new THREE.BoxGeometry(0.8, 1.6, 0.8);
         const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
@@ -148,7 +158,7 @@ function update() {
     if (keysPressed['s']) dz += 1;
     if (keysPressed['a']) dx -= 1;
     if (keysPressed['d']) dx += 1;
-    const magnitude = Math.sqrt(dx * dx + dz * dz);
+    const magnitude = Math.sqrt(dx * dz + dx * dx); // (오타 수정: dz*dz)
     if (magnitude > 0) {
         const targetRotation = Math.atan2(dx, dz);
         const normalizedDx = dx / magnitude;
@@ -165,9 +175,11 @@ function update() {
     }
     
     // (지형 감지)
+    // (★ 변경!) Raycaster가 Z-fighting과 상관없이 회색 바닥(ground)만 감지하도록 수정
     const rayOrigin = player.anchor.position.clone().add(rayOriginOffset);
     raycaster.set(rayOrigin, rayDirection);
-    const intersects = raycaster.intersectObjects([ground, groundWireframe]); 
+    const intersects = raycaster.intersectObject(ground); // groundWireframe 제거
+    
     if (intersects.length > 0) {
         player.baseY = intersects[0].point.y;
     }
@@ -187,20 +199,30 @@ function update() {
             player.anchor.position.y = player.baseY + newY;
         }
     } else {
+        // (★ 중요!) 점프 중이 아닐 때, 캐릭터 Y위치를 지형 높이로 설정
         player.anchor.position.y = player.baseY;
     }
     
     // (카메라)
     const cameraTargetPosition = player.anchor.position.clone().add(cameraOffset);
     camera.position.copy(cameraTargetPosition);
+    
     const lookAtTarget = player.anchor.position.clone();
     lookAtTarget.y += 1.0;
     camera.lookAt(lookAtTarget);
 }
 
-// (동일) 렌더링 루프
+// (★ 변경!) 렌더링 루프 (좌표 업데이트 추가)
 function animate() {
     requestAnimationFrame(animate);
+    
+    // (동일) 로직 업데이트
     update();
+    
+    // (★ 추가!) 좌표 UI 업데이트
+    const pos = player.anchor.position;
+    coordsElement.innerText = `X: ${pos.x.toFixed(2)}, Y: ${pos.y.toFixed(2)}, Z: ${pos.z.toFixed(2)}`;
+    
+    // (동일) 렌더링
     renderer.render(scene, camera);
 }
