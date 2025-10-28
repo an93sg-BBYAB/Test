@@ -1,7 +1,14 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+// (★ 추가!) 노이즈 라이브러리 import
+import { createNoise2D } from 'simplex-noise';
 
 const clock = new THREE.Clock();
+
+// (★ 추가!) 캐릭터 발밑을 감지할 Raycaster
+const raycaster = new THREE.Raycaster();
+const rayOriginOffset = new THREE.Vector3(0, 10, 0); // 캐릭터 머리 위 10칸
+const rayDirection = new THREE.Vector3(0, -1, 0);   // 아래 방향
 
 // 1. ------------------
 //   기본 환경 설정
@@ -26,35 +33,63 @@ window.addEventListener('resize', () => {
 // 2. ------------------
 //   게임 객체 생성
 // --------------------
-// (이전과 동일: ground, gridHelper...)
-const groundGeometry = new THREE.PlaneGeometry(100, 100);
-const groundMaterial = new THREE.MeshBasicMaterial({ color: 0x444444 });
+
+// (★ 변경!) 바닥 (Ground)
+// (100x100 크기, 50x50 격자로 잘게 나눔)
+const groundGeometry = new THREE.PlaneGeometry(100, 100, 50, 50);
+const groundMaterial = new THREE.MeshStandardMaterial({ 
+    color: 0x444444,
+    wireframe: false // true로 바꾸면 지형의 격자(요철)를 볼 수 있습니다.
+});
 const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
-const gridHelper = new THREE.GridHelper(100, 100, 0x888888, 0x888888);
-scene.add(gridHelper);
 
-// (★ 변경!) 플레이어 객체에서 회전 관련 변수 제거
+// (★ 추가!) 노이즈 생성기
+const noise2D = createNoise2D();
+
+// (★ 추가!) 지형 울퉁불퉁하게 만들기
+const vertices = ground.geometry.attributes.position;
+for (let i = 0; i < vertices.count; i++) {
+    const x = vertices.getX(i);
+    const z = vertices.getZ(i);
+    
+    // (중요!) 노이즈 값 계산
+    // 0.05: 지형의 '규모' (숫자가 작을수록 언덕이 큼)
+    // 2: 지형의 '높이' (숫자가 클수록 높낮이 차가 큼)
+    const y = noise2D(x * 0.05, z * 0.05) * 2; 
+    
+    vertices.setY(i, y); // 꼭짓점의 Y값 변경
+}
+// (중요!) 지오메트리 업데이트
+vertices.needsUpdate = true;
+ground.geometry.computeVertexNormals(); // 조명을 올바르게 받기 위해 법선 재계산
+
+// (★ 삭제!) GridHelper는 평면(y=0)이라 요철과 겹쳐서 지저분해 보임
+// scene.remove(gridHelper); // 이전 코드에 있다면 삭제
+// 대신 groundMaterial의 wireframe: true로 지형을 보세요.
+
+// (★ 추가!) 간단한 조명 (요철이 잘 보이도록)
+const light = new THREE.DirectionalLight(0xffffff, 1);
+light.position.set(5, 10, 5);
+scene.add(light);
+const ambientLight = new THREE.AmbientLight(0x404040);
+scene.add(ambientLight);
+
+// (이전과 동일: Player 객체 정의)
 const player = {
     speed: 0.1,
     anchor: new THREE.Object3D(),
     model: null,
-    
-    // (동일) 점프 변수
     isJumping: false,
     jumpStartTime: 0,
     jumpHeight: 1.6 / 3.0,
     timeToPeak: 0.25,
     jumpDuration: 0.5,
-    baseY: 0,
-    
-    // (동일) 쿨타임 변수
+    baseY: 0, // (중요!) 이 값을 Raycaster가 매 프레임 덮어쓸 예정
     isJumpCoolingDown: false,
     jumpCooldown: 0.2,
     jumpCooldownStartTime: 0,
-    
-    // (★ 삭제!) targetRotationY, currentRotationY 제거
 };
 scene.add(player.anchor);
 player.anchor.position.y = player.baseY;
@@ -78,7 +113,6 @@ gltfLoader.load('player.glb', (gltf) => {
     player.anchor.add(player.model);
 });
 
-
 // 3. ------------------
 //   입력 및 게임 루프
 // --------------------
@@ -88,7 +122,8 @@ window.addEventListener('keydown', (e) => { keysPressed[e.key.toLowerCase()] = t
 window.addEventListener('keyup', (e) => { keysPressed[e.key.toLowerCase()] = false; });
 const cameraOffset = new THREE.Vector3(0, 3, 5);
 
-// (★ 변경!) update 함수 내의 회전 로직 수정
+
+// (★ 변경!) update 함수 순서 및 Raycaster 로직 추가
 function update() {
     
     // (동일) 쿨타임 확인
@@ -104,74 +139,66 @@ function update() {
         player.jumpStartTime = clock.getElapsedTime();
     }
 
-    // --- 3. 수평 이동 및 (★)모델 회전 ---
+    // --- 3. 수평 이동 및 모델 회전 ---
+    // (이전과 동일: dx, dz, magnitude, targetRotation, lerp...)
     let dx = 0; 
     let dz = 0; 
-    let isMoving = false; // (★ 추가!) 이동 중인지 확인
-
     if (keysPressed['w']) dz -= 1;
     if (keysPressed['s']) dz += 1;
     if (keysPressed['a']) dx -= 1;
     if (keysPressed['d']) dx += 1;
-
     const magnitude = Math.sqrt(dx * dx + dz * dz);
-
-    if (magnitude > 0) { // (이동 중일 때)
-        isMoving = true;
-        
-        // 3-1. (동일) 목표 회전값(각도) 계산
+    if (magnitude > 0) {
         const targetRotation = Math.atan2(dx, dz);
-
-        // 3-2. (동일) 실제 위치 이동
         const normalizedDx = dx / magnitude;
         const normalizedDz = dz / magnitude;
         player.anchor.position.x += normalizedDx * player.speed;
         player.anchor.position.z += normalizedDz * player.speed;
-
-        // 3-3. (★ 변경!) 최단 경로 회전 로직
+        
         const currentRotation = player.anchor.rotation.y;
-        
-        // 현재 각도와 목표 각도의 차이를 계산
         let delta = targetRotation - currentRotation;
-
-        // (★ 중요!) 차이가 180도(PI)보다 크면, 반대 방향(360도/2*PI 빼기)으로 감
-        if (delta > Math.PI) {
-            delta -= 2 * Math.PI;
-        } 
-        // (★ 중요!) 차이가 -180도(-PI)보다 작으면, 반대 방향(360도/2*PI 더하기)으로 감
-        else if (delta < -Math.PI) {
-            delta += 2 * Math.PI;
-        }
-        
-        // '목표 각도'는 '현재 각도' + '최단 거리 차이'
+        if (delta > Math.PI) delta -= 2 * Math.PI;
+        else if (delta < -Math.PI) delta += 2 * Math.PI;
         const newTargetRotation = currentRotation + delta;
-
-        // (★ 변경!) anchor의 y축 회전값을 newTargetRotation으로 부드럽게 이동
-        player.anchor.rotation.y = THREE.MathUtils.lerp(
-            currentRotation,
-            newTargetRotation,
-            0.1 // 회전 속도
-        );
+        player.anchor.rotation.y = THREE.MathUtils.lerp(currentRotation, newTargetRotation, 0.1);
     }
     
-    // --- 4. 수직 이동 (점프) ---
-    // (이전과 동일)
+    // (★ 추가!) --- 4. 지형 높이 감지 (Raycasting) ---
+    // (중요!) 점프 로직 *전에* 실행되어야 함
+    
+    // 1. Raycaster 위치 설정 (캐릭터의 현재 x, z, 그리고 머리 위)
+    const rayOrigin = player.anchor.position.clone().add(rayOriginOffset);
+    raycaster.set(rayOrigin, rayDirection);
+    
+    // 2. 광선 발사 및 충돌 감지 (바닥만 감지)
+    const intersects = raycaster.intersectObject(ground);
+    
+    // 3. 충돌 지점의 y값을 player.baseY에 저장
+    if (intersects.length > 0) {
+        player.baseY = intersects[0].point.y;
+    }
+
+    // --- 5. 수직 이동 (점프) ---
+    // (이전과 동일, 하지만 player.baseY가 매번 바뀜)
     if (player.isJumping) {
         const jumpTime = clock.getElapsedTime() - player.jumpStartTime;
         if (jumpTime >= player.jumpDuration) {
             player.isJumping = false;
-            player.anchor.position.y = player.baseY; 
+            player.anchor.position.y = player.baseY; // (중요!) 착지 지점이 지형 높이
             player.isJumpCoolingDown = true;
             player.jumpCooldownStartTime = clock.getElapsedTime();
         } else {
             const a = player.jumpHeight / (player.timeToPeak * player.timeToPeak);
             const t = jumpTime - player.timeToPeak;
             const newY = -a * (t * t) + player.jumpHeight;
-            player.anchor.position.y = player.baseY + newY;
+            player.anchor.position.y = player.baseY + newY; // (중요!) 지형 높이 + 점프 높이
         }
+    } else {
+        // (★ 추가!) 점프 중이 아닐 때는, 캐릭터를 지형 높이에 붙임
+        player.anchor.position.y = player.baseY;
     }
     
-    // --- 5. 카메라 추적 ---
+    // --- 6. 카메라 추적 ---
     // (이전과 동일)
     const cameraTargetPosition = player.anchor.position.clone().add(cameraOffset);
     camera.position.copy(cameraTargetPosition);
