@@ -8,16 +8,15 @@ const raycaster = new THREE.Raycaster();
 const rayOriginOffset = new THREE.Vector3(0, 10, 0); 
 const rayDirection = new THREE.Vector3(0, -1, 0);   
 
-// (★ 추가!) 좌표 표시 엘리먼트
+// (동일) 좌표 엘리먼트
 const coordsElement = document.getElementById('coords');
 
 // 1. ------------------
 //   기본 환경 설정
 // --------------------
+// (이전과 동일: scene, camera, renderer, resize 리스너...)
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xFFFFFF); // (동일) 하얀색 배경
-
-// (동일) camera, renderer
+scene.background = new THREE.Color(0xFFFFFF); 
 const aspect = window.innerWidth / window.innerHeight;
 const camera = new THREE.PerspectiveCamera(75, aspect, 0.1, 1000);
 camera.position.set(0, 3, 5);
@@ -35,31 +34,27 @@ window.addEventListener('resize', () => {
 // 2. ------------------
 //   게임 객체 생성
 // --------------------
-
 // (동일) 바닥 지오메트리
 const groundGeometry = new THREE.PlaneGeometry(100, 100, 50, 50);
 
-// (★ 변경!) 바닥 재질: 짙은 회색
+// (동일) 짙은 회색 바닥
 const groundMaterial = new THREE.MeshStandardMaterial({ 
-    color: 0x444444, // 짙은 회색
+    color: 0x444444, 
     wireframe: false
 });
 const ground = new THREE.Mesh(groundGeometry, groundMaterial);
 ground.rotation.x = -Math.PI / 2;
 scene.add(ground);
 
-// (★ 변경!) 바닥 격자 테두리 (Z-fighting 해결)
+// (★ 변경!) Z-fighting 수정 (옵션 제거)
 const wireframeMaterial = new THREE.MeshBasicMaterial({ 
     color: 0xFFFF00, // 노란색
-    wireframe: true,
-    
-    // (★ 추가!) Z-fighting 해결을 위한 옵션
-    polygonOffset: true,
-    polygonOffsetFactor: -1.0,
-    polygonOffsetUnits: -0.1
+    wireframe: true 
 });
 const groundWireframe = new THREE.Mesh(groundGeometry, wireframeMaterial);
 groundWireframe.rotation.x = -Math.PI / 2;
+// (★ 변경!) Z-fighting 해결을 위해 격자를 0.01만큼 살짝 띄움
+groundWireframe.position.y = 0.01; 
 scene.add(groundWireframe);
 
 
@@ -89,7 +84,7 @@ const player = {
     model: null,
     isJumping: false,
     jumpStartTime: 0,
-    jumpHeight: 1.6 / 3.0, 
+    jumpHeight: 1.6 / 3.0, // (모델 로드 후 덮어쓸 임시값)
     timeToPeak: 0.25,
     jumpDuration: 0.5,
     baseY: 0, 
@@ -107,15 +102,24 @@ loadingManager.onLoad = () => {
     animate();
 };
 
-// (★ 변경!) GLTFLoader 로직 (모델 발밑 맞추기)
+// (★ 변경!) GLTFLoader 로직 (모델 발밑 수정)
 const gltfLoader = new GLTFLoader(loadingManager);
 gltfLoader.load(
     'player.glb', 
     (gltf) => {
         player.model = gltf.scene;
-        // (★ FIX!) 모델 로드 성공 시, 발밑 위치 조절
-        player.model.position.y = 1.6 / 2; // (가정) 모델 키의 절반
+        
+        // (★ FIX!) 모델의 y위치를 0으로 설정 (모델 원점이 발밑이라 가정)
+        player.model.position.y = 0; 
+        
         player.anchor.add(player.model);
+
+        // (★ 추가!) 실제 모델 크기 기반으로 점프 높이 재설정
+        const box = new THREE.Box3().setFromObject(player.model);
+        const size = box.getSize(new THREE.Vector3());
+        if (size.y > 0.1) { // 0이 아닌 유효한 크기일 때
+            player.jumpHeight = size.y / 3.0;
+        }
     }, 
     undefined, 
     (error) => {
@@ -124,7 +128,7 @@ gltfLoader.load(
         const geometry = new THREE.BoxGeometry(0.8, 1.6, 0.8);
         const material = new THREE.MeshBasicMaterial({ color: 0xff0000 });
         player.model = new THREE.Mesh(geometry, material);
-        player.model.position.y = 1.6 / 2;
+        player.model.position.y = 1.6 / 2; // 큐브는 중심이 원점이므로 띄움
         player.anchor.add(player.model);
     }
 );
@@ -135,7 +139,8 @@ window.addEventListener('keydown', (e) => { keysPressed[e.key.toLowerCase()] = t
 window.addEventListener('keyup', (e) => { keysPressed[e.key.toLowerCase()] = false; });
 const cameraOffset = new THREE.Vector3(0, 3, 5);
 
-// (동일) update 함수
+
+// (★ 변경!) update 함수 (W/S 오류 수정)
 function update() {
     
     // (쿨타임)
@@ -158,14 +163,20 @@ function update() {
     if (keysPressed['s']) dz += 1;
     if (keysPressed['a']) dx -= 1;
     if (keysPressed['d']) dx += 1;
-    const magnitude = Math.sqrt(dx * dz + dx * dx); // (오타 수정: dz*dz)
+    
+    // (★ FIX!) magnitude 계산 오타 수정 (dx * dz -> dx * dx)
+    const magnitude = Math.sqrt(dx * dx + dz * dz); 
+
     if (magnitude > 0) {
         const targetRotation = Math.atan2(dx, dz);
         const normalizedDx = dx / magnitude;
         const normalizedDz = dz / magnitude;
+        
+        // (★ 중요!) 이제 z축 이동이 정상적으로 계산됩니다.
         player.anchor.position.x += normalizedDx * player.speed;
         player.anchor.position.z += normalizedDz * player.speed;
         
+        // (동일) 회전 로직
         const currentRotation = player.anchor.rotation.y;
         let delta = targetRotation - currentRotation;
         if (delta > Math.PI) delta -= 2 * Math.PI;
@@ -175,10 +186,9 @@ function update() {
     }
     
     // (지형 감지)
-    // (★ 변경!) Raycaster가 Z-fighting과 상관없이 회색 바닥(ground)만 감지하도록 수정
     const rayOrigin = player.anchor.position.clone().add(rayOriginOffset);
     raycaster.set(rayOrigin, rayDirection);
-    const intersects = raycaster.intersectObject(ground); // groundWireframe 제거
+    const intersects = raycaster.intersectObject(ground); 
     
     if (intersects.length > 0) {
         player.baseY = intersects[0].point.y;
@@ -212,17 +222,14 @@ function update() {
     camera.lookAt(lookAtTarget);
 }
 
-// (★ 변경!) 렌더링 루프 (좌표 업데이트 추가)
+// (동일) 렌더링 루프
 function animate() {
     requestAnimationFrame(animate);
-    
-    // (동일) 로직 업데이트
     update();
     
-    // (★ 추가!) 좌표 UI 업데이트
+    // (동일) 좌표 UI
     const pos = player.anchor.position;
     coordsElement.innerText = `X: ${pos.x.toFixed(2)}, Y: ${pos.y.toFixed(2)}, Z: ${pos.z.toFixed(2)}`;
     
-    // (동일) 렌더링
     renderer.render(scene, camera);
 }
